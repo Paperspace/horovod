@@ -3,6 +3,7 @@ from __future__ import print_function
 import torch
 import argparse
 import torch.backends.cudnn as cudnn
+from torch.autograd import Variable
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data.distributed
@@ -264,22 +265,25 @@ def save_checkpoint(epoch):
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
         }
-        torch.save(state, filepath)
+        #torch.save(state, filepath)
         print('Saving PyTorch  model to: ' + export_dir)
         torch.save(state, export_dir + '/' + filepath)
-        # Save to ONNX model format
-        # dummy_input = torch.randn(10, 3, 224, 224, device='cuda')
-        dummy_input = Variable(torch.randn(1, 3, 256, 256, device='cuda')) # one color 256 x 256 picture will be the input to the model
 
-        print('Saving ONNX model to: ' + export_dir)
-        torch.onnx.export(model,               # model being run
-                  dummy_input,                 # model input (or a tuple for multiple inputs)
-                  export_dir + "/model.onnx",   # where to save the model (can be a file or file-like object)
-                  export_params=True)        # store the trained parameter weights inside the model file
-                  # opset_version=10,          # the ONNX version to export the model to
-                  #do_constant_folding=True,  # whether to execute constant folding for optimization
-                  #input_names = ['input'],   # the model's input names
-                  #output_names = ['output']) # the model's output names
+def export_model():
+  if hvd.rank() == 0:
+    # Save to ONNX model format
+    dummy_input = Variable(torch.randn(1, 3, 224, 224, device='cuda')) # one color 224 x 224 picture will be the input to the model
+
+    print('Saving ONNX model to: ' + export_dir)
+    torch.onnx.export(model,               # model being run
+              dummy_input,                 # model input (or a tuple for multiple inputs)
+              export_dir + "/model.onnx",   # where to save the model (can be a file or file-like object)
+              export_params=True)        # store the trained parameter weights inside the model file
+              # opset_version=10,          # the ONNX version to export the model to
+              #do_constant_folding=True,  # whether to execute constant folding for optimization
+              #input_names = ['input'],   # the model's input names
+              #output_names = ['output']) # the model's output names 
+  
                 
 
 # Horovod: average metrics from distributed training.
@@ -301,3 +305,4 @@ for epoch in range(resume_from_epoch, args.epochs):
     train(epoch)
     validate(epoch)
     save_checkpoint(epoch)
+export_model()   
