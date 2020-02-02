@@ -14,6 +14,9 @@ import math
 from tqdm import tqdm
 
 # Training settings
+
+export_dir = os.path.abspath(os.environ.get('PS_MODEL_PATH', os.getcwd() + '/models'))
+
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Example',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--train-dir', default=os.path.expanduser('~/imagenet/train'),
@@ -262,7 +265,22 @@ def save_checkpoint(epoch):
             'optimizer': optimizer.state_dict(),
         }
         torch.save(state, filepath)
+        print('Saving PyTorch  model to: ' + export_dir)
+        torch.save(state, export_dir + '/' + filepath)
+        # Save to ONNX model format
+        # dummy_input = torch.randn(10, 3, 224, 224, device='cuda')
+        dummy_input = Variable(torch.randn(1, 3, 256, 256, device='cuda')) # one color 256 x 256 picture will be the input to the model
 
+        print('Saving ONNX model to: ' + export_dir)
+        torch.onnx.export(model,               # model being run
+                  dummy_input,                 # model input (or a tuple for multiple inputs)
+                  export_dir + "/model.onnx",   # where to save the model (can be a file or file-like object)
+                  export_params=True)        # store the trained parameter weights inside the model file
+                  # opset_version=10,          # the ONNX version to export the model to
+                  #do_constant_folding=True,  # whether to execute constant folding for optimization
+                  #input_names = ['input'],   # the model's input names
+                  #output_names = ['output']) # the model's output names
+                
 
 # Horovod: average metrics from distributed training.
 class Metric(object):
@@ -278,7 +296,6 @@ class Metric(object):
     @property
     def avg(self):
         return self.sum / self.n
-
 
 for epoch in range(resume_from_epoch, args.epochs):
     train(epoch)
