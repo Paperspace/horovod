@@ -168,7 +168,7 @@ def test():
     if hvd.rank() == 0:
         print('\nTest set: Average loss: {:.4f}, Accuracy: {:.2f}%\n'.format(
             test_loss, 100. * test_accuracy))
-        model.save(export_dir, save_format='tf')
+        torch.save(model.state_dict(), export_dir)
 
 for epoch in range(1, args.epochs + 1):
     train(epoch)
