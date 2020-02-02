@@ -170,14 +170,16 @@ def test():
     if hvd.rank() == 0:
         print('\nTest set: Average loss: {:.4f}, Accuracy: {:.2f}%\n'.format(
             test_loss, 100. * test_accuracy))
-        torch.save(model.state_dict(), export_dir + 'model.pth')
+        print('Saving PyTorch  model to: ' + export_dir)
+        torch.save(model.state_dict(), export_dir + '/model.pth')
         # Save to ONNX model format
         # dummy_input = torch.randn(10, 3, 224, 224, device='cuda')
         dummy_input = Variable(torch.randn(1, 1, 28, 28, device='cuda')) # one black and white 28 x 28 picture will be the input to the model
-
+        
+        print('Saving ONNX model to: ' + export_dir)
         torch.onnx.export(model,               # model being run
                   dummy_input,                 # model input (or a tuple for multiple inputs)
-                  export_dir + "model.onnx",   # where to save the model (can be a file or file-like object)
+                  export_dir + "/model.onnx",   # where to save the model (can be a file or file-like object)
                   export_params=True)        # store the trained parameter weights inside the model file
                   # opset_version=10,          # the ONNX version to export the model to
                   #do_constant_folding=True,  # whether to execute constant folding for optimization
