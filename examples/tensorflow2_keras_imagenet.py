@@ -109,6 +109,7 @@ test_iter = test_gen.flow_from_directory(args.val_dir,
 
 
 # Set up standard ResNet-50 model.
+num_classes = int(os.environ.get('IMAGENET_CLASSES', 1000))
 model = keras.applications.resnet50.ResNet50(weights=None, classes=200)
 
 # Horovod: (optional) compression algorithm.
