@@ -33,7 +33,7 @@ parser.add_argument('--val-dir', default=os.path.expanduser('~/imagenet/validati
                     help='path to validation data')
 parser.add_argument('--log-dir', default='./logs',
                     help='tensorboard log directory')
-parser.add_argument('--checkpoint-format', default='./checkpoint-{epoch}.h5',
+parser.add_argument('--checkpoint-format', default='checkpoint-{epoch}.h5',
                     help='checkpoint file format')
 parser.add_argument('--fp16-allreduce', action='store_true', default=False,
                     help='use fp16 compression during allreduce')
@@ -55,6 +55,8 @@ parser.add_argument('--wd', type=float, default=0.00005,
                     help='weight decay')
 
 args = parser.parse_args()
+
+export_dir = os.path.abspath(os.environ.get('PS_MODEL_PATH', os.getcwd() + '/models'))
 
 print(tf.test.is_built_with_cuda())
 # data_format = ('channels_first'
@@ -175,8 +177,9 @@ callbacks = [
 
 # Horovod: save checkpoints only on the first worker to prevent other workers from corrupting them.
 if hvd.rank() == 0:
-    callbacks.append(keras.callbacks.ModelCheckpoint(args.checkpoint_format))
-    callbacks.append(keras.callbacks.TensorBoard(args.log_dir))
+    callbacks.append(keras.callbacks.ModelCheckpoint(export_dir + args.checkpoint_format))
+    
+    callbacks.append(keras.callbacks.TensorBoard(export_dir))
 
 # Train the model. The training will randomly sample 1 / N batches of training data and
 # 3 / N batches of validation data on every worker, where N is the number of workers.
