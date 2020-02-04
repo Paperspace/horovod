@@ -3,6 +3,7 @@ from __future__ import print_function
 import torch
 import argparse
 import torch.backends.cudnn as cudnn
+from torch.autograd import Variable
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data.distributed
@@ -14,6 +15,9 @@ import math
 from tqdm import tqdm
 
 # Training settings
+
+export_dir = os.path.abspath(os.environ.get('PS_MODEL_PATH', os.getcwd() + '/models'))
+
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Example',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--train-dir', default=os.path.expanduser('~/imagenet/train'),
@@ -30,8 +34,6 @@ parser.add_argument('--batches-per-allreduce', type=int, default=1,
                     help='number of batches processed locally before '
                          'executing allreduce across workers; it multiplies '
                          'total batch size.')
-parser.add_argument('--use-adasum', action='store_true', default=False,
-                    help='use adasum algorithm to do reduction')
 
 # Default settings from https://arxiv.org/abs/1706.02677.
 parser.add_argument('--batch-size', type=int, default=32,
@@ -127,21 +129,15 @@ val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.val_batch_
 # Set up standard ResNet-50 model.
 model = models.resnet50()
 
-# By default, Adasum doesn't need scaling up learning rate.
-# For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
-lr_scaler = args.batches_per_allreduce * hvd.size() if not args.use_adasum else 1
-
 if args.cuda:
     # Move model to GPU.
     model.cuda()
-    # If using GPU Adasum allreduce, scale learning rate by local_size.
-    if args.use_adasum and hvd.nccl_built():
-        lr_scaler = args.batches_per_allreduce * hvd.local_size()
 
 # Horovod: scale learning rate by the number of GPUs.
+# Gradient Accumulation: scale learning rate by batches_per_allreduce
 optimizer = optim.SGD(model.parameters(),
                       lr=(args.base_lr *
-                          lr_scaler),
+                          args.batches_per_allreduce * hvd.size()),
                       momentum=args.momentum, weight_decay=args.wd)
 
 # Horovod: (optional) compression algorithm.
@@ -151,8 +147,7 @@ compression = hvd.Compression.fp16 if args.fp16_allreduce else hvd.Compression.n
 optimizer = hvd.DistributedOptimizer(
     optimizer, named_parameters=model.named_parameters(),
     compression=compression,
-    backward_passes_per_step=args.batches_per_allreduce,
-    op=hvd.Adasum if args.use_adasum else hvd.Average)
+    backward_passes_per_step=args.batches_per_allreduce)
 
 # Restore from a previous checkpoint, if initial_epoch is specified.
 # Horovod: restore on the first worker which will broadcast weights to other workers.
@@ -261,9 +256,23 @@ def save_checkpoint(epoch):
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
         }
-        torch.save(state, filepath)
+        torch.save(state, export_dir + '/' + filepath)
+        
+def export_model():
+  if hvd.rank() == 0:
+    # Save to ONNX model format
+    dummy_input = Variable(torch.randn(1, 3, 224, 224, device='cuda')) # one color 224 x 224 picture will be the input to the model
 
-
+    print('Saving ONNX model to: ' + export_dir)
+    torch.onnx.export(model,               # model being run
+              dummy_input,                 # model input (or a tuple for multiple inputs)
+              export_dir + "/model.onnx",   # where to save the model (can be a file or file-like object)
+              export_params=True)        # store the trained parameter weights inside the model file
+              # opset_version=10,          # the ONNX version to export the model to
+              #do_constant_folding=True,  # whether to execute constant folding for optimization
+              #input_names = ['input'],   # the model's input names
+              #output_names = ['output']) # the model's output names 
+            
 # Horovod: average metrics from distributed training.
 class Metric(object):
     def __init__(self, name):
@@ -284,3 +293,5 @@ for epoch in range(resume_from_epoch, args.epochs):
     train(epoch)
     validate(epoch)
     save_checkpoint(epoch)
+export_model()    
+    

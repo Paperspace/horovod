@@ -7,7 +7,14 @@ from torchvision import datasets, transforms
 import torch.utils.data.distributed
 import horovod.torch as hvd
 
+from torch.autograd import Variable
+
+import os
+
 # Training settings
+
+export_dir = os.path.abspath(os.environ.get('PS_MODEL_PATH', os.getcwd() + '/models'))
+
 parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
@@ -27,9 +34,6 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--fp16-allreduce', action='store_true', default=False,
                     help='use fp16 compression during allreduce')
-parser.add_argument('--use-adasum', action='store_true', default=False,
-                    help='use adasum algorithm to do reduction')
-
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -92,18 +96,12 @@ class Net(nn.Module):
 
 model = Net()
 
-# By default, Adasum doesn't need scaling up learning rate.
-lr_scaler = hvd.size() if not args.use_adasum else 1
-
 if args.cuda:
     # Move model to GPU.
     model.cuda()
-    # If using GPU Adasum allreduce, scale learning rate by local_size.
-    if args.use_adasum and hvd.nccl_built():
-        lr_scaler = hvd.local_size()
 
-# Horovod: scale learning rate by lr_scaler.
-optimizer = optim.SGD(model.parameters(), lr=args.lr * lr_scaler,
+# Horovod: scale learning rate by the number of GPUs.
+optimizer = optim.SGD(model.parameters(), lr=args.lr * hvd.size(),
                       momentum=args.momentum)
 
 # Horovod: broadcast parameters & optimizer state.
@@ -116,8 +114,7 @@ compression = hvd.Compression.fp16 if args.fp16_allreduce else hvd.Compression.n
 # Horovod: wrap optimizer with DistributedOptimizer.
 optimizer = hvd.DistributedOptimizer(optimizer,
                                      named_parameters=model.named_parameters(),
-                                     compression=compression,
-                                     op=hvd.Adasum if args.use_adasum else hvd.Average)
+                                     compression=compression)
 
 
 def train(epoch):
@@ -173,7 +170,21 @@ def test():
     if hvd.rank() == 0:
         print('\nTest set: Average loss: {:.4f}, Accuracy: {:.2f}%\n'.format(
             test_loss, 100. * test_accuracy))
-
+        print('Saving PyTorch  model to: ' + export_dir)
+        torch.save(model.state_dict(), export_dir + '/model.pth')
+        # Save to ONNX model format
+        # dummy_input = torch.randn(10, 3, 224, 224, device='cuda')
+        dummy_input = Variable(torch.randn(1, 1, 28, 28, device='cuda')) # one black and white 28 x 28 picture will be the input to the model
+        
+        print('Saving ONNX model to: ' + export_dir)
+        torch.onnx.export(model,               # model being run
+                  dummy_input,                 # model input (or a tuple for multiple inputs)
+                  export_dir + "/model.onnx",   # where to save the model (can be a file or file-like object)
+                  export_params=True)        # store the trained parameter weights inside the model file
+                  # opset_version=10,          # the ONNX version to export the model to
+                  #do_constant_folding=True,  # whether to execute constant folding for optimization
+                  #input_names = ['input'],   # the model's input names
+                  #output_names = ['output']) # the model's output names
 
 for epoch in range(1, args.epochs + 1):
     train(epoch)
